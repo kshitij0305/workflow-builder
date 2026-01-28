@@ -13,20 +13,7 @@ import TriggerNode from './nodes/TriggerNode';
 import ActionNode from './nodes/ActionNode';
 import ConditionNode from './nodes/ConditionNode';
 import EndNode from './nodes/EndNode';
-const theme = {
-  bg: '#020617',      
-  panel: '#020617',
-  border: '#334155',      
-  text: '#e5e7eb',        
-
-  accent: '#6366f1',      
-  accentSoft: '#1e1b4b',
-
-  success: '#22c55e',   
-  danger: '#ef4444',     
-  dangerBg: '#7f1d1d',
-};
-
+import { theme } from './theme';
 
 const nodeTypes = {
   trigger: TriggerNode,
@@ -35,63 +22,48 @@ const nodeTypes = {
   end: EndNode,
 };
 
+const isMobile = window.innerWidth < 768;
+const toolbarStyle = {
+  position: 'absolute',
+  top: 10,
+  left: 10,
+  right: 10,
+  zIndex: 10,
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 8,
+  justifyContent: isMobile ? 'center' : 'space-between',
+};
+
 /* -------------------- INITIAL GRAPH -------------------- */
 
 const initialNodes = [
-  {
-    id: '1',
-    type: 'trigger',
-    position: { x: 100, y: 50 },
-    data: { label: 'Start Workflow' },
-  },
-  {
-    id: '2',
-    type: 'action',
-    position: { x: 100, y: 200 },
-    data: { label: 'Do Something' },
-  },
-  {
-    id: '3',
-    type: 'condition',
-    position: { x: 100, y: 350 },
-    data: { label: 'Is it OK?', result: true },
-  },
-  {
-    id: '4',
-    type: 'end',
-    position: { x: 100, y: 500 },
-    data: { label: 'End Workflow' },
-  },
+  { id: '1', type: 'trigger', position: { x: 100, y: 50 }, data: { label: 'Start Workflow' } },
+  { id: '2', type: 'action', position: { x: 100, y: 200 }, data: { label: 'Do Something' } },
+  { id: '3', type: 'condition', position: { x: 100, y: 350 }, data: { label: 'Is it OK?', result: true } },
+  { id: '4', type: 'end', position: { x: 100, y: 500 }, data: { label: 'End Workflow' } },
 ];
 
 const initialEdges = [];
 
-/* -------------------- ENGINE HELPERS -------------------- */
+/* -------------------- ENGINE -------------------- */
 
-function getNextNode(currentNode, edges) {
-  if (currentNode.type !== 'condition') {
-    const edge = edges.find(e => e.source === currentNode.id);
-    return edge ? edge.target : null;
+function getNextNode(node, edges) {
+  if (node.type !== 'condition') {
+    return edges.find(e => e.source === node.id)?.target ?? null;
   }
-
-  const handleId = currentNode.data.result ? 'true' : 'false';
-  const edge = edges.find(
-    e => e.source === currentNode.id && e.sourceHandle === handleId
-  );
-
-  return edge ? edge.target : null;
+  const handle = node.data.result ? 'true' : 'false';
+  return edges.find(e => e.source === node.id && e.sourceHandle === handle)?.target ?? null;
 }
 
 function validateWorkflow(nodes, edges) {
   const errors = [];
 
-  const triggers = nodes.filter(n => n.type === 'trigger');
-  if (triggers.length !== 1) {
+  if (nodes.filter(n => n.type === 'trigger').length !== 1) {
     errors.push('Workflow must have exactly one Trigger node.');
   }
 
-  const ends = nodes.filter(n => n.type === 'end');
-  if (ends.length === 0) {
+  if (!nodes.some(n => n.type === 'end')) {
     errors.push('Workflow must have at least one End node.');
   }
 
@@ -108,72 +80,26 @@ function validateWorkflow(nodes, edges) {
     outgoing[e.source]++;
   });
 
-  nodes.forEach(node => {
-    if (node.type !== 'trigger' && incoming[node.id] === 0) {
-      errors.push(`"${node.data.label}" has no incoming connection.`);
+  nodes.forEach(n => {
+    if (n.type !== 'trigger' && incoming[n.id] === 0) {
+      errors.push(`"${n.data.label}" has no incoming connection.`);
     }
-    if (node.type !== 'end' && outgoing[node.id] === 0) {
-      errors.push(`"${node.data.label}" has no outgoing connection.`);
+    if (n.type !== 'end' && outgoing[n.id] === 0) {
+      errors.push(`"${n.data.label}" has no outgoing connection.`);
     }
   });
 
   nodes
     .filter(n => n.type === 'condition')
-    .forEach(cond => {
-      const hasTrue = edges.some(
-        e => e.source === cond.id && e.sourceHandle === 'true'
-      );
-      const hasFalse = edges.some(
-        e => e.source === cond.id && e.sourceHandle === 'false'
-      );
-
-      if (!hasTrue || !hasFalse) {
-        errors.push(
-          `Condition "${cond.data.label}" must have both TRUE and FALSE branches.`
-        );
+    .forEach(c => {
+      const t = edges.some(e => e.source === c.id && e.sourceHandle === 'true');
+      const f = edges.some(e => e.source === c.id && e.sourceHandle === 'false');
+      if (!t || !f) {
+        errors.push(`Condition "${c.data.label}" must have both TRUE and FALSE branches.`);
       }
     });
 
-  return { isValid: errors.length === 0, errors };
-}
-
-function isValidConnection({ source, target, sourceHandle }, nodes, edges) {
-  if (source === target) return false;
-
-  const sourceNode = nodes.find(n => n.id === source);
-  const targetNode = nodes.find(n => n.id === target);
-  if (!sourceNode || !targetNode) return false;
-
-  if (targetNode.type === 'trigger') return false;
-  if (sourceNode.type === 'end') return false;
-
-  if (edges.some(e => e.target === target)) return false;
-
-  if (sourceNode.type === 'condition') {
-    if (sourceHandle !== 'true' && sourceHandle !== 'false') return false;
-    if (edges.some(e => e.source === source && e.sourceHandle === sourceHandle))
-      return false;
-  }
-
-  return true;
-}
-
-function createNode(type, position) {
-  const id = crypto.randomUUID();
-  const base = { id, type, position };
-
-  switch (type) {
-    case 'trigger':
-      return { ...base, data: { label: 'New Trigger' } };
-    case 'action':
-      return { ...base, data: { label: 'New Action' } };
-    case 'condition':
-      return { ...base, data: { label: 'New Condition', result: true } };
-    case 'end':
-      return { ...base, data: { label: 'End' } };
-    default:
-      return null;
-  }
+  return errors;
 }
 
 /* -------------------- APP -------------------- */
@@ -186,37 +112,27 @@ export default function App() {
   });
 
   const { nodes, edges } = history.present;
-
   const [activeNodeId, setActiveNodeId] = useState(null);
   const [errors, setErrors] = useState([]);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
 
   const selectedNode = nodes.find(n => n.id === selectedNodeId);
 
-  function commit(newNodes, newEdges) {
+  /* ---------- HISTORY ---------- */
+
+  function commit(nodes, edges) {
     setHistory(h => ({
       past: [...h.past, h.present],
-      present: { nodes: newNodes, edges: newEdges },
+      present: { nodes, edges },
       future: [],
     }));
   }
 
-  function updateGraph(nextNodes, nextEdges) {
-    if (nextNodes === nodes && nextEdges === edges) return;
-    commit(nextNodes, nextEdges);
-  }
-
-  /* ---------- UNDO / REDO ---------- */
-
   function undo() {
     setHistory(h => {
-      if (h.past.length === 0) return h;
-      const prev = h.past[h.past.length - 1];
-      return {
-        past: h.past.slice(0, -1),
-        present: prev,
-        future: [h.present, ...h.future],
-      };
+      if (!h.past.length) return h;
+      const prev = h.past.at(-1);
+      return { past: h.past.slice(0, -1), present: prev, future: [h.present, ...h.future] };
     });
     setActiveNodeId(null);
     setSelectedNodeId(null);
@@ -224,13 +140,9 @@ export default function App() {
 
   function redo() {
     setHistory(h => {
-      if (h.future.length === 0) return h;
+      if (!h.future.length) return h;
       const next = h.future[0];
-      return {
-        past: [...h.past, h.present],
-        present: next,
-        future: h.future.slice(1),
-      };
+      return { past: [...h.past, h.present], present: next, future: h.future.slice(1) };
     });
     setActiveNodeId(null);
     setSelectedNodeId(null);
@@ -239,43 +151,22 @@ export default function App() {
   /* ---------- SAVE / LOAD ---------- */
 
   function saveWorkflow() {
-    const data = JSON.stringify(history.present, null, 2);
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-
+    const blob = new Blob([JSON.stringify(history.present, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
-    a.href = url;
+    a.href = URL.createObjectURL(blob);
     a.download = 'workflow.json';
     a.click();
-
-    URL.revokeObjectURL(url);
   }
 
-  function loadWorkflow(event) {
-    const file = event.target.files[0];
+  function loadWorkflow(e) {
+    const file = e.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
-    reader.onload = e => {
-      try {
-        const parsed = JSON.parse(e.target.result);
-        if (!parsed.nodes || !parsed.edges) {
-          alert('Invalid workflow file');
-          return;
-        }
-
-        setHistory({
-          past: [],
-          present: parsed,
-          future: [],
-        });
-
-        setActiveNodeId(null);
-        setSelectedNodeId(null);
-        setErrors([]);
-      } catch {
-        alert('Failed to load workflow');
-      }
+    reader.onload = ev => {
+      setHistory({ past: [], present: JSON.parse(ev.target.result), future: [] });
+      setErrors([]);
+      setActiveNodeId(null);
+      setSelectedNodeId(null);
     };
     reader.readAsText(file);
   }
@@ -284,140 +175,156 @@ export default function App() {
 
   const onNodesChange = useCallback(
     changes => {
-      if (changes.every(c => c.type === 'reset')) return;
-      const updatedNodes = applyNodeChanges(changes, nodes);
-      updateGraph(updatedNodes, edges);
+      setHistory(h => ({
+        ...h,
+        present: { ...h.present, nodes: applyNodeChanges(changes, h.present.nodes) },
+      }));
     },
+    []
+  );
+
+  const onNodeDragStop = useCallback(
+    (_, node) => commit(nodes.map(n => (n.id === node.id ? node : n)), edges),
     [nodes, edges]
   );
 
   const onEdgesChange = useCallback(
-    changes => {
-      const updatedEdges = applyEdgeChanges(changes, edges);
-      updateGraph(nodes, updatedEdges);
-    },
+    changes => commit(nodes, applyEdgeChanges(changes, edges)),
     [nodes, edges]
   );
 
   const onConnect = useCallback(
-    params => {
-      if (!isValidConnection(params, nodes, edges)) return;
-      updateGraph(nodes, addEdge(params, edges));
-    },
-    [nodes, edges]
-  );
-
-  const updateNodeLabel = useCallback(
-    (id, label) => {
-      updateGraph(
-        nodes.map(n =>
-          n.id === id ? { ...n, data: { ...n.data, label } } : n
-        ),
-        edges
-      );
-    },
+    params => commit(nodes, addEdge(params, edges)),
     [nodes, edges]
   );
 
   function addNode(type) {
-    const position = {
-      x: 200 + Math.random() * 200,
-      y: 100 + nodes.length * 80,
-    };
-    updateGraph([...nodes, createNode(type, position)], edges);
+    commit(
+      [
+        ...nodes,
+        {
+          id: crypto.randomUUID(),
+          type,
+          position: { x: 300, y: 120 + nodes.length * 80 },
+          data: type === 'condition' ? { label: 'Condition', result: true } : { label: type },
+        },
+      ],
+      edges
+    );
   }
 
+  /* ---------- EXECUTION ---------- */
+
   function runWorkflow() {
-    const result = validateWorkflow(nodes, edges);
-    if (!result.isValid) {
-      setErrors(result.errors);
+    const errs = validateWorkflow(nodes, edges);
+    if (errs.length) {
+      setErrors(errs);
       setActiveNodeId(null);
       return;
     }
 
     setErrors([]);
+    let current = nodes.find(n => n.type === 'trigger')?.id;
+    if (!current) return;
 
-    let currentId = nodes.find(n => n.type === 'trigger')?.id;
-    if (!currentId) return;
-
-    setActiveNodeId(currentId);
-
-    const interval = setInterval(() => {
-      const node = nodes.find(n => n.id === currentId);
-      if (!node || node.type === 'end') return clearInterval(interval);
-
+    setActiveNodeId(current);
+    const timer = setInterval(() => {
+      const node = nodes.find(n => n.id === current);
+      if (!node || node.type === 'end') return clearInterval(timer);
       const next = getNextNode(node, edges);
-      if (!next) return clearInterval(interval);
-
-      currentId = next;
-      setActiveNodeId(currentId);
+      if (!next) return clearInterval(timer);
+      current = next;
+      setActiveNodeId(current);
     }, 800);
   }
 
   const nodesWithExecutionState = nodes.map(n => ({
     ...n,
-    data: {
-      ...n.data,
-      isActive: n.id === activeNodeId,
-      onLabelChange: updateNodeLabel,
-      nodeId: n.id,
-    },
+    data: { ...n.data, isActive: n.id === activeNodeId },
   }));
 
-  const darkButton = {
-    background: '#020617',
-    color: '#e5e7eb',
-    border: '1px solid #334155',
-    padding: '6px 10px',
-    borderRadius: 6,
-    cursor: 'pointer',
+  const btn = {
+    background: theme.panel,
+    color: theme.text,
+    border: `1px solid ${theme.border}`,
+    padding: '10px 12px',
+    borderRadius: 8,
+    fontSize: 14,
   };
 
   return (
-    <div
-      style={{
-        width: '100vw',
-        height: '100vh',
-        background: '#020617',
-        color: '#e5e7eb',
-      }}
-    >
-      <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 10 }}>
-        <button style={darkButton} onClick={runWorkflow}>▶ Run</button>{' '}
-        <button style={darkButton} onClick={undo} disabled={!history.past.length}>↩ Undo</button>{' '}
-        <button style={darkButton} onClick={redo} disabled={!history.future.length}>↪ Redo</button>{' '}
-        <button style={darkButton} onClick={saveWorkflow}>💾 Save</button>{' '}
-        <label style={darkButton}>
-          📂 Load
-          <input type="file" accept=".json" hidden onChange={loadWorkflow} />
-        </label>
-      </div>
+    <div style={{ width: '100vw', height: '100vh', background: theme.bg }}>
+      <div style={toolbarStyle}>
+  {/* LEFT GROUP */}
+  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+    <button style={btn} onClick={runWorkflow}>▶ Run</button>
+    <button style={btn} onClick={undo}>↩ Undo</button>
+    <button style={btn} onClick={redo}>↪ Redo</button>
+    <button style={btn} onClick={saveWorkflow}>💾 Save</button>
+    <label style={btn}>
+      📂 Load
+      <input hidden type="file" accept=".json" onChange={loadWorkflow} />
+    </label>
+  </div>
 
-      <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 10 }}>
-        <button style={darkButton} onClick={() => addNode('trigger')}>➕ Trigger</button>{' '}
-        <button style={darkButton} onClick={() => addNode('action')}>➕ Action</button>{' '}
-        <button style={darkButton} onClick={() => addNode('condition')}>➕ Condition</button>{' '}
-        <button style={darkButton} onClick={() => addNode('end')}>➕ End</button>
-      </div>
+  {/* RIGHT GROUP */}
+  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+    <button style={btn} onClick={() => addNode('trigger')}>➕ Trigger</button>
+    <button style={btn} onClick={() => addNode('action')}>➕ Action</button>
+    <button style={btn} onClick={() => addNode('condition')}>➕ Condition</button>
+    <button style={btn} onClick={() => addNode('end')}>➕ End</button>
+  </div>
+</div>
 
-      {errors.length > 0 && (
+
+      {/* CONDITION PANEL */}
+      {selectedNode?.type === 'condition' && (
         <div
           style={{
             position: 'absolute',
-            top: 60,
-            left: 10,
-            background: '#7f1d1d',
-            border: '1px solid #ef4444',
-            padding: '10px 14px',
-            borderRadius: 8,
-            zIndex: 10,
-            maxWidth: 320,
+            bottom: isMobile ? 0 : 'auto',
+            right: 0,
+            top: isMobile ? 'auto' : 0,
+            width: isMobile ? '100%' : 260,
+            height: isMobile ? 180 : '100%',
+            background: theme.panel,
+            borderTop: isMobile ? `1px solid ${theme.border}` : undefined,
+            borderLeft: !isMobile ? `1px solid ${theme.border}` : undefined,
+            padding: 12,
+            zIndex: 20,
           }}
         >
+          <h3>Condition</h3>
+          <select
+            value={selectedNode.data.result ? 'true' : 'false'}
+            onChange={e =>
+              commit(
+                nodes.map(n =>
+                  n.id === selectedNode.id
+                    ? { ...n, data: { ...n.data, result: e.target.value === 'true' } }
+                    : n
+                ),
+                edges
+              )
+            }
+          >
+            <option value="true">TRUE</option>
+            <option value="false">FALSE</option>
+          </select>
+        </div>
+      )}
+
+      {/* ERRORS */}
+      {errors.length > 0 && (
+        <div style={{ position: 'absolute', top: 60, left: 10, background: theme.dangerBg, border: `1px solid ${theme.danger}`, padding: 12, borderRadius: 8, maxWidth: 340, zIndex: 10 }}>
           <strong>Workflow Errors</strong>
-          <ul>
-            {errors.map((e, i) => <li key={i}>{e}</li>)}
-          </ul>
+          <ul>{errors.map((e, i) => <li key={i}>{e}</li>)}</ul>
+        </div>
+      )}
+
+      {isMobile && (
+        <div style={{ position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)', fontSize: 12, opacity: 0.6 }}>
+          Drag to pan · Pinch to zoom
         </div>
       )}
 
@@ -426,12 +333,19 @@ export default function App() {
         edges={edges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
+        onNodeDragStop={onNodeDragStop}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeClick={(_, n) => setSelectedNodeId(n.id)}
         onPaneClick={() => setSelectedNodeId(null)}
         fitView
         colorMode="dark"
+        panOnDrag
+        panOnScroll
+        zoomOnPinch
+        zoomOnScroll={false}
+        zoomOnDoubleClick={false}
+        selectionOnDrag={false}
       >
         <Background />
         <Controls />
